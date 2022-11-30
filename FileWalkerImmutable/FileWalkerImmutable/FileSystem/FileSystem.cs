@@ -7,7 +7,8 @@ using System.Threading.Tasks;
 
 namespace FileWalkerImmutable
 {
-    record FileSystem(ImmutableDictionary<Guid, ImmutableList<IComponent>> Map,
+    // ChildrenMap maps the Guid of folders to the list of their children components.
+    record FileSystem(ImmutableDictionary<Guid, ImmutableList<IComponent>> ChildrenMap,
         ImmutableDictionary<Guid, ImmutableList<IComponentObserver>> Observers)
     {
         public FileSystem() : this(
@@ -28,21 +29,24 @@ namespace FileWalkerImmutable
         public IEnumerable<IComponent> Children(IComponent folder)
         {
             // Check if children exist, if not return empty list.
-            return Map[folder.ID] ?? Enumerable.Empty<IComponent>();
+            if (ChildrenMap.TryGetValue(folder.ID, out var value))
+                return value;
+            else
+                return Enumerable.Empty<IComponent>();
         }
 
         public FileSystem Add(IComponent parent, IComponent child)
         {
             // Add the child to the parent's children list if it has one, otherwise create a new children list.
-            Map.TryGetValue(parent.ID, out var value);
+            ChildrenMap.TryGetValue(parent.ID, out var value);
             var newChildren = value switch
             {
                 null => ImmutableList.Create(child),
                 var children => children.Add(child)
             };
 
-            var newMap = Map.SetItem(parent.ID, newChildren);
-            return this with { Map = newMap };
+            var newMap = ChildrenMap.SetItem(parent.ID, newChildren);
+            return this with { ChildrenMap = newMap };
         }
 
         public FileSystem AddList(IComponent parent, IEnumerable<IComponent> children)
@@ -57,23 +61,23 @@ namespace FileWalkerImmutable
 
             // Remove all children first.
             var fs = this;
-            Map.TryGetValue(component.ID, out var children);
+            ChildrenMap.TryGetValue(component.ID, out var children);
             if (children != null) {
                 foreach (var child in children)
                     fs = Remove(child);
             }
 
             // Make the map temporarily mutable so we can easily work with it.
-            var builder = fs.Map.ToBuilder();
+            var builder = fs.ChildrenMap.ToBuilder();
 
             builder.Remove(component.ID);
-            foreach(var kvp in fs.Map)
+            foreach(var kvp in fs.ChildrenMap)
             {
                 if (kvp.Value.Contains(component))
                     builder[kvp.Key] = kvp.Value.Remove(component);
             }
 
-            return fs with { Map = builder.ToImmutable() };
+            return fs with { ChildrenMap = builder.ToImmutable() };
         }
 
         public FileSystem Replace(IComponent oldComponent, IComponent newComponent)
@@ -81,20 +85,20 @@ namespace FileWalkerImmutable
             NotifyChange(oldComponent, newComponent);
 
             // Make the map temporarily mutable so we can easily work with it.
-            var builder = Map.ToBuilder();
+            var builder = ChildrenMap.ToBuilder();
 
             builder.Remove(oldComponent.ID);
 
-            Map.TryGetValue(oldComponent.ID, out var oldChildren);
+            ChildrenMap.TryGetValue(oldComponent.ID, out var oldChildren);
             builder.Add(newComponent.ID, oldChildren);
 
-            foreach(var kvp in Map)
+            foreach(var kvp in ChildrenMap)
             {
                 if (kvp.Value?.Contains(oldComponent) == true)
                     builder[kvp.Key] = kvp.Value.Replace(oldComponent, newComponent);
             }
 
-            return this with { Map = builder.ToImmutable() };
+            return this with { ChildrenMap = builder.ToImmutable() };
         }
 
         public FileSystem Rename(IComponent component, string newName)
